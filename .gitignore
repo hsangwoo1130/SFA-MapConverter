@@ -27,3 +27,6 @@ trace.log
 
 # Oracle Pro*C generated
 *.lis
+
+# Credentials (copy from DBUserSFA.ini.sample and fill in)
+DBUserSFA.ini
