@@ -1,0 +1,22 @@
+
+#
+#                       Abort  Inkless Process
+#
+
+# Abort ............................................... [PROCESSmgr]
+  echo "[Kill 1]. Abort PROCESSmgr Process"
+  for PROCID in `ps -ef | grep Mapcvt_Insert_Mi | cut -c 9-15`
+  do
+        #for NAME in `ps -p $PROCID | cut -c 33-`   ===> if DIGITAL SERVER 
+        for NAME in `ps -p $PROCID | cut -c 22-`
+        do
+           if  [ "$NAME" = "ksh" ] || [ "$NAME" = "COMMAND" ] || [ "$NAME" = "grep" ]
+             then
+                continue
+             else
+                echo [ $PROCID ] is killed
+                kill -15 $PROCID
+           fi
+        done
+  done
+

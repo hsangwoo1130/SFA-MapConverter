@@ -1,0 +1,30 @@
+all: build
+include $(ORACLE_HOME)/precomp/lib/env_precomp.mk
+
+USERID=inkless/inkless
+PROCFLAGS= sqlcheck=full userid=$(USERID) 
+EXE=Mapcvt_Insert.exe
+CC = cc
+
+DFLAGS=-D_HPUX_SOURCE -w -D_DEBUG_LOG -D_DEBUG_MODE 
+CFLAGS= -Aa -D_HPUX_SOURCE 
+
+.SUFFIXES: .pc .c .o .typ .h
+
+OBJS=Mapcvt_Insert.o RegistProcess.o InsertDB.o libm.a
+
+.pc.c:
+	$(PROC) $(PROCFLAGS) iname=$*
+
+.pc.o:
+	$(PROC) $(PROCFLAGS) iname=$*
+	$(CC) $(CFLAGS) $(DFLAGS) -c $*.c
+
+.c.o:
+	$(CC) $(CFLAGS) $(DFLAGS) -c $*.c
+
+build: 	$(OBJS)
+	$(CC) -o $(EXE) $(OBJS) -L$(LIBHOME) $(LIBCLNTSH) $(LIBSQL)
+
+clean:
+	rm -f *.o

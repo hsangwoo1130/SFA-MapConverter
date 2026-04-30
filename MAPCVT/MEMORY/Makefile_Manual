@@ -1,0 +1,29 @@
+#
+# $Header: Makefile@@/main/osdo_7.3.2/pl_hpux_7.3.2/0 \
+# Checked out on Wed Apr 10 12:51:55 PDT 1996 by kthrift \
+# Copyright (c) 1996 by Oracle Corporation. All Rights Reserved. \
+# $
+#
+# To link program with client shared library, ORA_CLIENT_LIB environment
+# variable needs to be set to "shared" before the make command.
+# e.g.  setenv ORA_CLIENT_LIB shared / export ORA_CLIENT_LIB=shared;
+#       make -f proc.mk EXE=xyz OBJS=xyz.o [ build ]
+#
+
+ORALIB=$(ORACLE_HOME)/lib/libclntsh.sl $(ORACLE_HOME)/lib/libsql.a
+#PROCFLAGS= MODE=ORACLE dbms=v6_char ireclen=1024 oreclen=1024 select_error=no 
+PROCFLAGS= char_map=varchar2 dbms=v7
+PROC=proc
+
+SYSLIB=-lm
+CFLAGS= -Aa -D_HPUX_SOURCE -D_MANUAL_MODE -D_DEBUG_MODE
+#CFLAGS= -Aa -D_HPUX_SOURCE -D_MANUAL_MODE -D_DEBUG_LOG
+
+# Rule to compile any program (specify EXE= and OBJS= on command line)
+OBJ=Mapcvt_Insert.c RegistProcessCvt.c InsertDB.c
+EXE=Manual_Insert.exe
+
+Mapcvt_Insert:   
+	$(PROC) $(PROCFLAGS) iname=InsertDB.pc
+	$(CC) $(CFLAGS) -o $(EXE) $(OBJ) $(SYSLIB) $(ORALIB) 
+	@delo.exe

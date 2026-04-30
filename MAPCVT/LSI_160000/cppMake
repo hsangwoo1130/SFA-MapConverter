@@ -1,0 +1,29 @@
+all:: MKSrv
+
+include $(ORACLE_HOME)/precomp/lib/env_precomp.mk
+
+LDSTRING=
+PRODUCT_LIBHOME=
+USERID=mksrv/mksrv
+PROCPLSFLAGS= sqlcheck=full userid=$(USERID) dbms=v6_char
+PROCPPFLAGS= code=cpp include=/usr/include include=/usr/include/cxx
+INCLUDE=$(I_SYM). $(PRECOMPPUBLIC)
+
+CXX=CC
+OBJ=sqltest.o
+EXE=sqltest
+
+.SUFFIXES:.o .cpp .pc .c
+
+MKSrv : $(OBJ)
+	$(CXX) -o $(EXE) $(OBJ) -L$(LIBHOME) $(PROLDLIBS)
+	@rm -f *.o
+
+.pc.cpp:
+	$(PROC) $(PROCPPFLAGS) iname=$*.pc CPP_SUFFIX=cpp
+
+.cpp.o:
+	$(CXX) -c $(INCLUDE) $*.cpp
+
+.c.o:
+	$(CXX) -c $*.c

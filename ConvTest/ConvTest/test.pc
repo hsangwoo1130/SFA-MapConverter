@@ -1,0 +1,1135 @@
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "Map_data_task.h"
+/*
+#include "global.h"
+#include "messages.h"
+*/
+
+void sql_error(char *msg);
+
+/* define for InsertLog function */
+#define DELIMITER "=\n"
+#define LPCTSTR         char *
+
+#define OUTPUT_FILE "wafer_bin_conv_list_v2.cfg"
+#define MAX_RESULT_LEN 2000
+EXEC SQL INCLUDE sqlca.h;
+
+EXEC SQL BEGIN DECLARE SECTION;
+  VARCHAR	username[20];
+  VARCHAR	passwd[20];
+  
+  VARCHAR       result[MAX_RESULT_LEN];
+
+  VARCHAR       stWAFER_ID[20]; /* WAFER_ID*/
+  VARCHAR       cIDTYP[1];   /* ID TYPE*/
+  VARCHAR       cMAPFT[1];   /* MAP FORMAT*/
+  int           nFNLOC;      /* FLAT ZONE LOCATION */
+  int           nFFROT;      /* FILM FRAME ROTATION */
+  VARCHAR       cORLOC[1];      /* ORIGIN LOCATION */
+  VARCHAR       cPRAXI[1];      /* PROCESS AXIS */
+  VARCHAR       stBCEQU[10];  /* BIN CATEGORY */
+  VARCHAR       stNULBC[1];   /* EMPTY DIES NOTATION */
+  int           nRPSEL;      /* COUNT OF REFERENCE DIES */
+  int           nREFP1_X;    /* X POSITION OF REFERENCE DIE#1 */
+  int           nREFP1_Y;    /* Y POSITION OF REFERENCE DIE#1 */
+  int           nREFP2_X;    /* X POSITION OF REFERENCE DIE#2 */
+  int           nREFP2_Y;    /* Y POSITION OF REFERENCE DIE#2 */
+  int           nREFP3_X;    /* X POSITION OF REFERENCE DIE#3 */
+  int           nREFP3_Y;    /* Y POSITION OF REFERENCE DIE#3 */
+  int           nREFP4_X;    /* X POSITION OF REFERENCE DIE#4 */
+  int           nREFP4_Y;    /* Y POSITION OF REFERENCE DIE#4 */
+  int           nROWCT;      /* ROW DIES COUNT */
+  int           nCOLCT;      /* COLUMN DIES COUNT */
+  int           nPDRCT;      /* BIN SUM COUNT OF BCEQU BINS */
+  int           nSTRP_X;     /* X POSITION OF START DIE */
+  int           nSTRP_Y;     /* Y POSITION OF START DIE */
+  VARCHAR       stBIN_LIST[160000]; /* BIN LIST */
+  VARCHAR       cMAPER[1];       /* MAP ERROR CODE */
+  int           nDATLC;       /* LOCATION OF ERROR */
+  VARCHAR       stRECV_TIME[14];   /* WAFER RECEIVED TIME to YHS1 */
+  VARCHAR       stSTART_TIME[14];  /* START TIME FOR DIE BONDING */
+  VARCHAR       stFINISH_TIME[14]; /* WAFER FINISH TIME FOR DIE BONDING */
+  VARCHAR       stWORK_FINISHED[2]; /* WORK FINISHED FLAG */
+  VARCHAR       stRECORD_INSERTED[2]; /* RECORD_INSERTED */
+  VARCHAR       stRECORD_UPDATED[2]; /* RECORD_UPDATED */
+
+  /* Host variables for map rotating function */
+  VARCHAR      stPartId[32];
+  int          nFFROT;
+  int          nFNLOC;
+  int          nORLOC;
+
+  /* Added two variables for run-sheet by msyun 98/10/28 */
+  VARCHAR       stRUN_ID[20]; /* WAFER_ID*/
+  int           nNET_DIE_CNT;      /* BIN SUM COUNT OF BCEQU BINS */
+
+EXEC SQL END DECLARE SECTION;
+
+int DBReadFileSave_V2();
+char GetBinValue (int nBinNo, char cCurValue );
+int  GetWaferBinListFromFile();
+char gszBinListInfo[1024];
+
+
+#ifdef _MANUAL_MODE   /** you just want to handle One Map file, NOT Map file Group(RUN)` **/  
+
+int main(argc, argv)
+int argc;
+int* argv[];
+{
+	if (argc < 2)
+	{
+		printf("Usage Error!! : usage:%s eds_file_name\n", argv[0]);
+		exit(-1);
+	}
+
+    printf ("Argument File Name [%s]\n", argv[1]);
+
+    return 1;
+}
+
+#else    /** you want to handle RUN  **/
+
+int main (int argc, char *argv[])
+{
+	char	cRetValue;
+	char	szBinList[256];
+	int	    bReadBinList;
+    int     nRetValue;
+#ifdef _DEBUG_MODE
+    printf("#1... DB Read and File Save\n");
+#endif
+    nRetValue = DBReadFileSave_V2();
+
+	cRetValue = '1';
+
+	/* Use WaferID => MapBody.stMID */
+    bReadBinList = GetWaferBinListFromFile ();
+	
+	if ( bReadBinList == 1 )	
+	{
+        cRetValue = GetBinValue (15, cRetValue );
+		printf("Conv Result [%c]\n", cRetValue );
+	}
+}
+#endif
+
+int GetWaferBinListFromFile()
+{
+	FILE *fpBinInfo;
+	char stBinInfoFile[512];
+	char stBuff[512];
+	char stTemp[256];
+	char *stTok;
+	char *stTokBin;
+
+	char szReadWaferID[256];
+	char szReadBinList[512];
+
+	sprintf(stBinInfoFile, "%s", OUTPUT_FILE);	/* Wafer Bin Info */
+
+	memset ( gszBinListInfo, 0x0, sizeof ( gszBinListInfo ) );
+
+	if ( (fpBinInfo = fopen(stBinInfoFile, "r")) == NULL ) 
+    {
+            printf("Can't open : [%s] \n", stBinInfoFile);
+			return 0;
+	}
+
+	while ( !feof(fpBinInfo) ) {
+		memset(stBuff, '\0', sizeof(stBuff));
+		if ( fgets(stBuff, sizeof(stBuff), fpBinInfo) )
+		{
+			printf("[%s]\n", stBuff ); 
+
+			stTok = strtok(stBuff, " \r\n");
+			printf("....[%s] \n", stTok);
+
+			if (strcmp(stTok, "WAFERSPEC") == 0)
+			{
+				while ((stTok = strtok(NULL, "= \r\n")) != NULL)
+				{
+					printf("....[%s] \n", stTok);
+					/*if (strcmp(stTok, "WAFERID") == 0)
+					{
+						stTok = strtok(NULL, "=() \r\n");
+						if ( stTok == NULL ) break;
+
+						strcpy ( szReadWaferID, stTok );
+						printf(".....WAFERID.. [%s]\n", szReadWaferID );
+
+						if ( strcmp( szReadWaferID, szWaferID ) != 0 ) break;
+					}
+					else if ( strcmp (stTok, "BINCONVLIST") == 0 )*/
+					if (strcmp(stTok, "BINCONVLIST") == 0)
+					{
+						stTok = strtok(NULL, "=() \r\n");
+						if ( stTok == NULL ) return 0;  /* break;*/
+
+						strcpy ( szReadBinList, stTok );
+						printf(".....BINLIST.. [%s]\n", szReadBinList );
+						
+						strcpy ( gszBinListInfo, szReadBinList );
+						return 1;
+
+					}
+
+				} /* end of while */
+			}
+		}
+	} /* end of while(!feof(fpBinInfo) ... */
+
+	fclose(fpBinInfo);
+	return 0;
+}
+
+char GetBinValue (int nBinNo, char cCurValue )
+{
+	char *stTokBin;
+	int  nReadBinNo;
+	char cSetBinNo;
+	int  nLoopCount;
+	char szBinList[256];
+
+	strcpy ( szBinList, gszBinListInfo );
+
+	if ( cCurValue == '1' )		/* GOOD BIN인 경우만 처리함 (사고방지) */
+	{
+
+		printf( ">>> SELECT BIN [%d] - BINLIST [%s]\n",  nBinNo, szBinList );
+		if ( strlen ( szBinList ) == 0 ) return cCurValue; /* Noting Bin List */
+
+		stTokBin = strtok(szBinList,",:");
+		if ( stTokBin == NULL ) return cCurValue;
+
+		printf(">> Bin [%s]\n", stTokBin );
+		
+		nLoopCount = 0;
+		nReadBinNo = atoi(stTokBin);
+		if ( nReadBinNo == nBinNo )
+		{
+			stTokBin = strtok(NULL, ",:");
+			if ( stTokBin == NULL ) return cCurValue;
+
+			cSetBinNo = stTokBin[0];
+
+			printf("....SET BIN (%d) [%c->%c]\n", nBinNo, cCurValue, cSetBinNo );
+			return cSetBinNo;
+		}
+		while ((stTokBin = strtok(NULL, ",:")) != NULL)
+		{
+			nLoopCount++;
+			if ( nLoopCount % 2 == 0 )
+			{
+				printf(">> Bin [%s]\n", stTokBin );
+				nReadBinNo = atoi(stTokBin);
+				if ( nReadBinNo == nBinNo )
+				{
+					stTokBin = strtok(NULL, ",:");
+					if ( stTokBin == NULL ) return cCurValue;
+
+					cSetBinNo = stTokBin[0];
+
+					printf("....SET BIN (%d) [%c->%c]\n", nBinNo, cCurValue, cSetBinNo );
+					return cSetBinNo;
+				}
+			}
+		}
+	}
+	return cCurValue;
+}
+
+int DBReadFileSave_V2()
+{
+  FILE *fp;
+
+  EXEC SQL WHENEVER SQLERROR GOTO error_handler;
+ 
+  username.len = sprintf((LPCTSTR)username.arr,"t_inkless");
+  passwd.len = sprintf((LPCTSTR)passwd.arr,"inkless");
+  EXEC SQL CONNECT :username IDENTIFIED BY :passwd;
+  printf("Connected to Oracle database.\n");
+
+  memset(result.arr, 0, sizeof(result.arr));
+  result.len = 0;
+
+  EXEC SQL SELECT
+    'WAFERSPEC BINCONVLIST=(' ||
+    max(decode(seq, 1, conv_bin, '')) ||
+    max(decode(seq, 2, ','||conv_bin, '')) ||
+    max(decode(seq, 3, ','||conv_bin, '')) ||
+    max(decode(seq, 4, ','||conv_bin, '')) ||
+    max(decode(seq, 5, ','||conv_bin, '')) ||
+    max(decode(seq, 6, ','||conv_bin, '')) ||
+    max(decode(seq, 7, ','||conv_bin, '')) ||
+    max(decode(seq, 8, ','||conv_bin, '')) ||
+    max(decode(seq, 9, ','||conv_bin, '')) ||
+    max(decode(seq, 10, ','||conv_bin, '')) || ')'
+    INTO :result
+    FROM (
+        SELECT ROWNUM AS seq,
+            before_bin||':'||after_bin conv_bin
+        FROM (
+            SELECT before_bin, after_bin
+            FROM inkless_bin_config
+            WHERE use_yn = 'Y'
+            ORDER BY before_bin
+        )
+    );
+    
+    /* check whether query returned data */
+    if (sqlca.sqlcode == 0)
+    {
+        result.arr[result.len] = '\0';
+ 
+        /* Open output file for writing */
+        fp = fopen(OUTPUT_FILE, "w");
+        if (fp == NULL)
+        {
+            fprintf(stderr, "Error: Cannot open file %s for writing.\n", OUTPUT_FILE);
+            EXEC SQL ROLLBACK WORK RELEASE;
+            exit(1);
+        }
+        fprintf(fp, "%s\n", result.arr);
+        fclose(fp);
+        #ifdef _DEBUG_MODE
+            printf("Result written to %s successfully.\n", OUTPUT_FILE);
+        #endif
+    }
+    else if (sqlca.sqlcode == 1403)
+    {
+        printf("No data found in inkless_bin_config table where use_yn = 'Y'.\n");
+    }
+    else
+    {
+        sql_error("SQL execution failed");
+    }
+    
+    EXEC SQL COMMIT WORK RELEASE;  
+    return 0;
+
+    error_handler:
+        sql_error("");
+        return 1;
+}
+
+void sql_error(char *msg)
+{
+    char err_msg[512];
+    size_t buf_len, msg_len;
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    fprintf(stderr, "\nOracle Error occurred\n");
+    buf_len = sizeof(err_msg);
+    sqlglm(err_msg, &buf_len, &msg_len);
+    fprintf(stderr, "Oracle Error: %.*s\n", (int)msg_len, err_msg);
+    
+    EXEC SQL ROLLBACK WORK RELEASE;
+    exit(1);
+}
+
+int nInsertDb(mbMapBody,stPartId)
+MAP_BODY *mbMapBody;
+char *stPartId;
+{
+
+
+    int nCount;
+    char stTemp[20];
+    char stBIN_LIST_Before[160000];
+    int  nBIN_LIST_Len;
+    int  nRotatingTimes;
+    int  nMapCompare;
+    int nTemp;
+
+
+    /* Set local Data Base descriptions and connect*/
+    username.len = sprintf((LPCTSTR)username.arr,"inkless");
+    passwd.len = sprintf((LPCTSTR)passwd.arr,"inkless");
+    EXEC SQL CONNECT :username IDENTIFIED BY :passwd ;
+    if(sqlca.sqlcode != 0) {
+#ifdef _DEBUG_MODE
+       printf("DATA BASE CONNECTION ERROR [%d]\n",sqlca.sqlcode);
+#endif
+       return(sqlca.sqlcode);
+    }
+#ifdef _DEBUG_MODE
+    printf("DATA BASE  CONNECTION COMPLETED!\n");
+#endif
+
+
+    /* Rotate MAP_BODY(NO ERROR EXCEPTION) */
+    /* 
+       Have no return values, means can ignore rotating error 
+       If error occured during rotating map, original map data
+       will be inserted, and query function can rotate this map
+       correctly, using equipment setting values(FFROT,FNLOC,ORLOC) 
+    */
+#ifdef _DEBUG_MODE
+    printf("ROTATEMAPBODY START\n");
+#endif
+            /*************
+	      Check Map Rotation Work
+	      Added by stainles. 2000.03.23
+             *************/
+    memset(stBIN_LIST_Before, '\0', sizeof(stBIN_LIST_Before));
+    memcpy(stBIN_LIST_Before, mbMapBody->stBINLT, strlen(mbMapBody->stBINLT));
+    nBIN_LIST_Len = strlen(stBIN_LIST_Before);
+
+    nRotatingTimes = RotateMapBody(mbMapBody,stPartId);
+
+	 /******
+	     If Map Rotation Work is wrong 
+	     It will return MapRotationErr Flag  
+	  *********/
+    nMapCompare = memcmp(stBIN_LIST_Before,mbMapBody->stBINLT,nBIN_LIST_Len);
+
+#ifdef _DEBUG_MODE
+    printf("nRotatinTimes = [%d] \n", nRotatingTimes);
+    printf("nMapCompare = [%d] \n", nMapCompare);
+#endif
+
+    if(nRotatingTimes != 0 && nMapCompare == 0) {
+#ifdef _DEBUG_MODE
+                printf("MAP ROTATING FAIL I \n");
+#endif
+		return (MapRotationErr);
+    }
+
+    if(nMapCompare != 0 && nRotatingTimes == 0 ) {
+#ifdef _DEBUG_MODE
+                printf("MAP ROTATING FAIL II \n");
+#endif
+		return (MapRotationErr);
+    }
+
+#ifdef _DEBUG_MODE
+    printf("ROTATEMAPBODY COMPLETED\n");
+#endif
+
+    /* Initialize all host variables for remove all gabages */ 
+    memset(stWAFER_ID.arr,'\0',20);
+    memset(cIDTYP.arr,'\0',1);
+    memset(cMAPFT.arr,'\0',1);
+    memset(cORLOC.arr,'\0',1);
+    memset(cPRAXI.arr,'\0',1);
+    nFNLOC = nFFROT =  0;
+    memset(stBCEQU.arr,'\0',10);
+    memset(stNULBC.arr,'\0',1);
+    nRPSEL = nREFP1_X = nREFP1_Y = nREFP2_X = nREFP2_Y = nREFP3_X = 0;
+    nREFP3_Y = nREFP4_X = nREFP4_Y = nROWCT = nCOLCT = 0;
+    nPDRCT = nSTRP_X = nSTRP_Y = 0;
+    memset(stBIN_LIST.arr,'\0',160000);
+    memset(cMAPER.arr,'\0',1);
+    nDATLC = 0;
+    memset(stRECV_TIME.arr,'\0',14);
+    memset(stSTART_TIME.arr,'\0',14);
+    memset(stFINISH_TIME.arr,'\0',14);
+    memset(stWORK_FINISHED.arr,'\0',2);
+    memset(stRECORD_INSERTED.arr,'\0',2);
+    memset(stRECORD_UPDATED.arr,'\0',2);
+
+
+    /*
+    []-------------------------------------------------------------[]
+      Setting all host variables for Inserting using imsgMsg data 
+    []-------------------------------------------------------------[]
+    */
+    
+    /* Set WAFER_ID */
+    stWAFER_ID.len = sprintf((LPCTSTR)stWAFER_ID.arr,mbMapBody->stMID);
+
+    /* Set IDTYP */
+    cIDTYP.arr[0] = mbMapBody->cIDTYP;
+    cIDTYP.len = 1;
+
+    /* Set MAPFT */
+    cMAPFT.arr[0] = mbMapBody->cMAPFT;
+    cMAPFT.len = 1;
+
+    /* Set FNLOC */
+    nFNLOC = mbMapBody->uFNLOC;
+
+    /* Set FFROT */
+    nFFROT = mbMapBody->uFFROT;
+
+    /* Set ORLOC */
+    cORLOC.arr[0] = mbMapBody->cORLOC;
+    cORLOC.len = 1;
+
+    /* Set PRAXI */
+    cPRAXI.arr[0] = mbMapBody->cPRAXI;
+    cPRAXI.len = 1;
+
+    /* Set BCEQU */
+    stBCEQU.len = sprintf((LPCTSTR)stBCEQU.arr,mbMapBody->stBCEQU);
+
+    /* Set NULBC */
+    stNULBC.arr[0] = mbMapBody->cNULBC;
+    stNULBC.len = 1;
+
+    /* Set RPSEL */
+    nRPSEL = mbMapBody->uRPSEL;
+
+    /* Set REFP1_X */
+    nREFP1_X = mbMapBody->REFP1.sXpos;
+
+    /* Set REFP1_Y */
+    nREFP1_Y = mbMapBody->REFP1.sYpos;
+
+    /* Set REFP2_X */
+    nREFP2_X = mbMapBody->REFP2.sXpos;
+
+    /* Set REFP2_Y */
+    nREFP2_Y = mbMapBody->REFP2.sYpos;
+
+    /* Set REFP3_X */
+    nREFP3_X = mbMapBody->REFP3.sXpos;
+
+    /* Set REFP3_Y */
+    nREFP3_Y = mbMapBody->REFP3.sYpos;
+
+    /* Set REFP4_X */
+    nREFP4_X = mbMapBody->REFP4.sXpos;
+
+    /* Set REFP4_Y */
+    nREFP4_Y = mbMapBody->REFP4.sYpos;
+
+    /* Set ROWCT */
+    nROWCT = mbMapBody->uROWCT;
+
+    /* Set COLCT */
+    nCOLCT = mbMapBody->uCOLCT;
+
+    /* Set PDRCT */
+    nPDRCT = mbMapBody->uPDRCT;
+
+    /* Set STRP_X */
+    nSTRP_X = mbMapBody->STRP.sXpos;
+
+    /* Set STRP_Y */
+    nSTRP_Y = mbMapBody->STRP.sYpos;
+
+    /* Set BINLIST */
+    memcpy(stBIN_LIST.arr,mbMapBody->stBINLT,strlen(mbMapBody->stBINLT));
+    stBIN_LIST.len = strlen((LPCTSTR)stBIN_LIST.arr);
+
+    /* Set MAPER */
+    cMAPER.arr[0] = mbMapBody->cMAPER;
+    cMAPER.len = 1;
+
+    /* Modified for run_sheet by msyun 98/10/18 */
+    /* Set NET_DIE_CNT */
+    nNET_DIE_CNT = mbMapBody->uNET_DIE_CNT;
+
+    /* Set RUN_ID */
+    stRUN_ID.len = sprintf((LPCTSTR)stRUN_ID.arr,mbMapBody->stRUN_ID);
+
+    EXEC SQL SELECT TO_CHAR(SYSDATE, 'yyyymmddhh24miss') NOW
+	       INTO :stRECV_TIME
+	     FROM DUAL;
+    memset(stRECORD_INSERTED.arr,'\0',2);
+    memset(stRECORD_UPDATED.arr,'\0',2);
+    stRECORD_INSERTED.len = sprintf((LPCTSTR)stRECORD_INSERTED.arr,"%s",RECORD_INSERTED);
+    stRECORD_UPDATED.len = sprintf((LPCTSTR)stRECORD_UPDATED.arr,"%s",RECORD_MATCHED);
+    memset(stWORK_FINISHED.arr,'\0',2);
+
+
+    EXEC SQL INSERT INTO WAFER_MAP_HITACHI (
+           WAFER_ID,
+           IDTYP,
+           MAPFT,
+           FNLOC,
+           FFROT,
+           ORLOC,
+           PRAXI,
+           BCEQU,
+           NULBC,
+           RPSEL,
+           REFP1_X,
+           REFP1_Y,
+           REFP2_X,
+           REFP2_Y,
+           REFP3_X,
+           REFP3_Y,
+           REFP4_X,
+           REFP4_Y,
+           ROWCT,
+           COLCT,
+           PDRCT,
+           STRP_X,
+           STRP_Y,
+           BIN_LIST,
+           MAPER,
+           DATLC,
+           RECV_TIME,
+           RECORD_INSERTED,
+           RECORD_UPDATED,
+           UPDATE_TIME,
+           /* Modified for run_sheet by msyun 98/10/18 */
+	   RUN_ID,NET_DIE_CNT
+	 ) VALUES (
+           :stWAFER_ID,
+           :cIDTYP,
+           :cMAPFT,
+           :nFNLOC,
+           :nFFROT,
+           :cORLOC,
+           :cPRAXI,
+           :stBCEQU,
+           :stNULBC,
+           :nRPSEL,
+           :nREFP1_X,
+           :nREFP1_Y,
+           :nREFP2_X,
+           :nREFP2_Y,
+           :nREFP3_X,
+           :nREFP3_Y,
+           :nREFP4_X,
+           :nREFP4_Y,
+           :nROWCT,
+           :nCOLCT,
+           :nPDRCT,
+           :nSTRP_X,
+           :nSTRP_Y,
+           :stBIN_LIST,
+           :cMAPER,
+           :nDATLC,
+           TO_DATE(:stRECV_TIME,'yyyymmddhh24miss'),
+           :stRECORD_INSERTED,
+           :stRECORD_UPDATED,
+           TO_DATE(:stRECV_TIME,'yyyymmddhh24miss'),
+           /* Modified for run_sheet by msyun 98/10/18 */
+	   :stRUN_ID,:nNET_DIE_CNT
+	 );
+
+    if(sqlca.sqlcode != 0)
+      {
+	/**** Dont care for manual inserted data */
+	/**** Except Duplicate Error  */
+        if(sqlca.sqlcode != -1) {
+#ifdef _DEBUG_MODE
+	   printf("Error Insert [%d]\n",sqlca.sqlcode);
+#endif
+	   return(sqlca.sqlcode);
+	 }
+	     /** Modified by stainles 2000/1/10 **/
+	     /** FNLOC, FFROT, ORLOC, RPSEL, REFP, **/
+	     /** ROWCT, COLCT, PDRCT .. are updated too **/
+	 EXEC SQL UPDATE WAFER_MAP_HITACHI
+	    SET FNLOC = :nFNLOC,
+	        FFROT = :nFFROT,
+	        ORLOC = :cORLOC,
+		RPSEL = :nRPSEL,
+		REFP1_X = :nREFP1_X,
+		REFP1_Y = :nREFP1_Y,
+		REFP2_X = :nREFP2_X,
+		REFP2_Y = :nREFP2_Y,
+		REFP3_X = :nREFP3_X,
+		REFP3_Y = :nREFP3_Y,
+		REFP4_X = :nREFP4_X,
+		REFP4_Y = :nREFP4_Y,
+		ROWCT = :nROWCT,
+		COLCT = :nCOLCT,
+		PDRCT = :nPDRCT,
+		STRP_X = :nSTRP_X,
+		STRP_Y = :nSTRP_Y,
+		BIN_LIST = :stBIN_LIST,
+                RUN_ID = :stRUN_ID,           /* Modified by stainles 98/12/02 */
+                UPDATE_TIME = TO_DATE(:stRECV_TIME,'yyyymmddhh24miss'),
+		RECORD_UPDATED = '1'
+            WHERE WAFER_ID = :stWAFER_ID; 
+        if(sqlca.sqlcode != 0) {
+#ifdef _DEBUG_MODE
+	   printf("RECORD EXIST --> UPDATE Error [%d]\n",sqlca.sqlcode);
+#endif
+	   return(sqlca.sqlcode);
+	 }
+#ifdef _DEBUG_MODE
+	   printf("RECOED EXIST==> UPDATED!!\n");
+#endif
+       }
+
+
+#ifdef _DEBUG_MODE
+    printf("INSERT COMPLETED \n");
+#endif
+    EXEC SQL COMMIT WORK RELEASE;
+
+    return(EXE_OK);
+}
+
+int RotateMapBody(mbMapBody,stPartId)
+MAP_BODY *mbMapBody;
+char *stPartId;
+{
+    MAP_BODY mbTemp;
+    int      nRotatingTimes;
+    int      nRotatingDegree;
+    int      nCount;
+    int      nTemp;
+    int      nEdsRowCt;
+    int      nEdsColCt;
+    POINT    pntTemp;
+    char     stTempArray[600][600];
+    char     stRotatedArray[600][600];
+    int      nLoopCol;
+    int      nLoopRow;
+    POINT    pntCENTER;
+    POINT    pntORG_QUAD1;
+    POINT    pntORG_QUAD2;
+    POINT    pntORG_QUAD3;
+    POINT    pntORG_QUAD4;
+    POINT    pntREFPvsCENTER;
+
+    /* Copy MAP_BODY for handling temporary 
+       for preparing situation for error occured,
+       if error occured, do not modity original MAPBODY 
+    */
+    memset(&mbTemp,'\0',sizeof(MAP_BODY));
+    memcpy(&mbTemp,mbMapBody,sizeof(MAP_BODY));
+/*
+    EXEC SQL SELECT FNLOC, FFROT, ORLOC into :nFNLOC, :nFFROT, :nORLOC
+		FROM MAPROTATION_REF WHERE PART_ID = :stPartId;
+
+   if(sqlca.sqlcode != 0) {
+      printf("Can't Read reference information partid[%s] with[%d]\n",stPartId,sqlca.sqlcode);
+      EXEC SQL INSERT INTO MAPROTATION_REF
+	    (PART_ID,FNLOC,FFROT,ORLOC,UPDATED)
+	    VALUES (
+	       :stPartId,180,90,4,1);
+      if(sqlca.sqlcode != 0) {
+         printf("Can't Insert reference information partid[%s] with[%d]\n",stPartId,sqlca.sqlcode);
+      }
+    EXEC SQL SELECT FNLOC,FFROT,ORLOC
+	 INTO  :nFNLOC,:nFFROT,:nORLOC
+	 FROM MAPROTATION_REF
+	 WHERE PART_ID = :stPartId;
+   }
+   */
+   /********************************temporary blocked 
+   if(sqlca.sqlcode != 0) {
+#ifdef _DEBUG_MODE
+       printf("Can't Read reference information partid[%s]\n",stPartId);
+#endif
+       return;
+   }
+   ********************************temporary blocked ************/
+
+   /* Change Quad coordination for reference die position */
+   /* Calc Center position */
+   pntCENTER.sXpos = (mbTemp.uCOLCT / 2) ;
+   pntCENTER.sYpos = (mbTemp.uROWCT / 2) ;
+
+   pntORG_QUAD1.sXpos =  (mbTemp.uCOLCT - 1) - pntCENTER.sXpos ;
+   pntORG_QUAD1.sYpos =  pntCENTER.sYpos;
+   pntORG_QUAD2.sXpos =  pntCENTER.sXpos * -1;
+   pntORG_QUAD2.sYpos =  pntCENTER.sYpos;
+   pntORG_QUAD3.sXpos =  pntCENTER.sXpos * -1;
+   pntORG_QUAD3.sYpos =  ((mbTemp.uROWCT - 1 ) - pntCENTER.sYpos) * -1;
+   pntORG_QUAD4.sXpos =  (mbTemp.uCOLCT - 1) - pntCENTER.sXpos ;
+   pntORG_QUAD4.sYpos =  ((mbTemp.uROWCT - 1 ) - pntCENTER.sYpos) * -1;
+
+#ifdef _DEBUG_MODE
+   printf("mbTemp,cORLOC = [%x], CENTER[%d][%d],Q1[%d][%d], Q2[%d][%d], Q3[%d][%d], Q4[%d][%d]\n",mbTemp.cORLOC,
+	   pntCENTER.sXpos,pntCENTER.sYpos, pntORG_QUAD1.sXpos,pntORG_QUAD1.sYpos,
+	   pntORG_QUAD2.sXpos,pntORG_QUAD2.sYpos,
+	   pntORG_QUAD3.sXpos,pntORG_QUAD3.sYpos,
+	   pntORG_QUAD4.sXpos,pntORG_QUAD4.sYpos);
+#endif
+   switch(mbTemp.cORLOC){
+      case  '\1'  : 
+		    pntREFPvsCENTER.sXpos = mbTemp.REFP1.sXpos + pntORG_QUAD1.sXpos;
+		    pntREFPvsCENTER.sYpos = mbTemp.REFP1.sYpos + pntORG_QUAD1.sYpos;
+		    break;
+      case  '\2'  : 
+		    pntREFPvsCENTER.sXpos = mbTemp.REFP1.sXpos + pntORG_QUAD2.sXpos;
+		    pntREFPvsCENTER.sYpos = mbTemp.REFP1.sYpos + pntORG_QUAD2.sYpos;
+		    break;
+      case  '\3'  : 
+		    pntREFPvsCENTER.sXpos = mbTemp.REFP1.sXpos + pntORG_QUAD3.sXpos;
+		    pntREFPvsCENTER.sYpos = mbTemp.REFP1.sYpos + pntORG_QUAD3.sYpos;
+		    break;
+      case  '\4'  : 
+		    pntREFPvsCENTER.sXpos = mbTemp.REFP1.sXpos + pntORG_QUAD4.sXpos;
+		    pntREFPvsCENTER.sYpos = mbTemp.REFP1.sYpos + pntORG_QUAD4.sYpos;
+		    break;
+   } /* end of switch */
+
+#ifdef _DEBUG_MODE
+   printf("pntREFPvsCENTER[%d][%d]\n", pntREFPvsCENTER.sXpos,pntREFPvsCENTER.sYpos);
+   printf("EQUIPMENT SETTING CONDITION : nORLOC[%d]\n",nORLOC); 
+#endif
+   switch(nORLOC){
+      case  1  : 
+		    mbTemp.REFP1.sXpos = pntREFPvsCENTER.sXpos  - pntORG_QUAD1.sXpos;
+		    mbTemp.REFP1.sYpos = pntREFPvsCENTER.sYpos  - pntORG_QUAD1.sYpos;
+		    break;
+      case  2  : 
+		    mbTemp.REFP1.sXpos = pntREFPvsCENTER.sXpos  - pntORG_QUAD2.sXpos;
+		    mbTemp.REFP1.sYpos = pntREFPvsCENTER.sYpos  - pntORG_QUAD2.sYpos;
+		    break;
+      case  3  : 
+		    mbTemp.REFP1.sXpos = pntREFPvsCENTER.sXpos  - pntORG_QUAD3.sXpos;
+		    mbTemp.REFP1.sYpos = pntREFPvsCENTER.sYpos  - pntORG_QUAD3.sYpos;
+		    break;
+      case  4  : 
+		    mbTemp.REFP1.sXpos = pntREFPvsCENTER.sXpos  - pntORG_QUAD4.sXpos;
+		    mbTemp.REFP1.sYpos = pntREFPvsCENTER.sYpos  - pntORG_QUAD4.sYpos;
+		    break;
+   } /* end of switch */
+#ifdef _DEBUG_MODE
+   printf("mbTemp.REFP1[%d][%d]\n", mbTemp.REFP1.sXpos, mbTemp.REFP1.sYpos);
+#endif
+
+
+   /* Save bin lists row/col counts for EDS MAP DATA */
+   /* Because row/col counts can be modified during
+      rotating reference die position 
+   */
+   nEdsRowCt = mbTemp.uROWCT;
+   nEdsColCt = mbTemp.uCOLCT;
+
+   nRotatingDegree = nFNLOC + nFFROT - mbTemp.uFNLOC;
+
+
+   /* if nRotatingDegree is negative, add 360 for making positive value
+      because, negative degree is hard to calculate rotating times */
+   if(nRotatingDegree < 0) nRotatingDegree += 360;
+
+   /* calculate how many times to rotate BIN_LIST */
+   nRotatingTimes = nRotatingDegree / 90;
+
+#ifdef _DEBUG_MODE
+   printf("REFERENCE SETUP CONDITION : PART_ID[%s],FNLOC[%d],FFROT[%d],ORLOC[%d]\n",stPartId,nFNLOC,nFFROT,nORLOC);
+   printf("EDS CONDITION : FNLOC[%d]\n",mbTemp.uFNLOC);
+   printf("MAP ROTATION :  rotationdegree[%d],rotationtimes[%d]\n",nRotatingDegree,nRotatingTimes);
+#endif
+
+   for(nCount = 0 ; nCount < nRotatingTimes ; nCount++) {
+#ifdef _DEBUG_MODE
+     printf("Rotating reference die position right-hand side....");
+#endif
+     /* Rotate Reference Die position */
+#ifdef _DEBUG_MODE
+     printf("reference position[%d][%d]==>",mbTemp.REFP1.sXpos,mbTemp.REFP1.sYpos);
+#endif
+     pntTemp.sXpos =  mbTemp.REFP1.sYpos - (mbTemp.uROWCT -1);
+     pntTemp.sYpos =  mbTemp.REFP1.sXpos * (-1);
+     mbTemp.REFP1.sXpos =  pntTemp.sXpos;
+     mbTemp.REFP1.sYpos =  pntTemp.sYpos;
+#ifdef _DEBUG_MODE
+     printf("[%d][%d]\n",mbTemp.REFP1.sXpos,mbTemp.REFP1.sYpos);
+#endif
+
+     /* rotate row count & column count */
+     nTemp =  mbTemp.uROWCT;
+     mbTemp.uROWCT = mbTemp.uCOLCT;
+     mbTemp.uCOLCT = nTemp;
+#ifdef _DEBUG_MODE
+     printf("completed \n");
+#endif
+   } /* end of for */
+
+   /* Read bin lists from MAP_BODY structure and set
+      temp array 
+   */
+   nCount = 0;
+   for(nLoopRow = 0 ; nLoopRow < nEdsRowCt ; nLoopRow++) {
+      for(nLoopCol = 0 ; nLoopCol < nEdsColCt ; nLoopCol++) {
+         stTempArray[nLoopCol][nLoopRow] = mbTemp.stBINLT[nCount++];
+      } /* end of for(nLoopRowt = 0 ; nLoopRowt < nEdsRowCt ; nLoopRowt++)*/ 
+   } /* end of for(nLoopCt = 0 ; nLoopCt < nEdsColCt ; nLoopCt ++)*/ 
+
+   /* Rotate  bin lists from temp array to RotatedArry nRotatingTimes 
+      must rotate 180 degrees for real bin list array .
+      current nRotatingDegree matches real flatzone location
+      on equipment, so bin_list array must be rotated 180 degree.
+
+      This means if real wafer flat zone location was rotated right_hand side nRotatingTimes
+      the bin list data must be rotated left-hand side nRotating Times
+   */
+   nCount = 0;
+   /* Reverse Bin list, because real wafer is reversed to data */
+   switch(nRotatingTimes){
+       case 0 : nRotatingTimes = 2; break;
+       case 2 : nRotatingTimes = 0; break;
+       /* Case 1,3 has no problem because map bin list rotated left-hand side */
+   }
+   for(nCount = 0 ; nCount < nRotatingTimes ; nCount++) {
+#ifdef _DEBUG_MODE
+      printf("Rotating MAP BIN LIST left-hand side ColCt[%d],RowCt[%d]==>",nEdsColCt,nEdsRowCt);
+#endif
+      for(nLoopRow = 0 ; nLoopRow < nEdsRowCt ; nLoopRow++) {
+         for(nLoopCol = 0 ; nLoopCol < nEdsColCt ; nLoopCol++) {
+	    /* Rotate BIN-MAP left-hand site one time */
+            stRotatedArray[nLoopRow][nEdsColCt - nLoopCol - 1] = stTempArray[nLoopCol][nLoopRow];
+         } /* end of for(nLoopCol = 0 ; nLoopCol < nEdsColCt ; nLoopCol ++)*/ 
+      } /* end of for(nLoopRow = 0 ; nLoopRowt < nEdsRowC ; nLoopRow++)*/ 
+      nTemp = nEdsColCt;
+      nEdsColCt = nEdsRowCt;
+      nEdsRowCt = nTemp;
+      for(nLoopRow = 0 ; nLoopRow < nEdsRowCt ; nLoopRow++) {
+         for(nLoopCol = 0 ; nLoopCol < nEdsColCt ; nLoopCol++) {
+            stTempArray[nLoopCol][nLoopRow] = stRotatedArray[nLoopCol][nLoopRow];
+         } /* end of for(nLoopCol = 0 ; nLoopCol < nEdsColCt ; nLoopCol ++)*/ 
+      } /* end of for(nLoopRow = 0 ; nLoopRowt < nEdsRowC ; nLoopRow++)*/ 
+
+#ifdef _DEBUG_MODE
+      printf("ColCt[%d],RowCt[%d]...Rotating completed!\n",nEdsColCt,nEdsRowCt);
+      /***************************************************/
+      for(nLoopRow = 0 ; nLoopRow < nEdsRowCt ; nLoopRow++) {
+         for(nLoopCol = 0 ; nLoopCol < nEdsColCt ; nLoopCol++) {
+	   printf(" %c ",stRotatedArray[nLoopCol][nLoopRow]);
+	 }
+	   printf("\n");
+      }
+      /***************************************************/
+#endif
+   }/* end of for(nCount = 0 ; nCount < nRotatingTimes ; nCount++)*/
+
+   /* Update tempArray */
+   nCount = 0;
+   if(nRotatingTimes){
+      memset(mbTemp.stBINLT,'\0',160000);
+      for(nLoopRow = 0 ; nLoopRow < mbTemp.uROWCT ; nLoopRow++) {
+         for(nLoopCol = 0 ; nLoopCol < mbTemp.uCOLCT ; nLoopCol++) {
+	   mbTemp.stBINLT[nCount++] = stRotatedArray[nLoopCol][nLoopRow]; 
+         }/* end of for(nLoopRow = 0 ; nLoopRow < mbTemp.uCOLCT ; nLoopRow++) */
+      } /* end of for(nCount = 0 ; nCount < mbTemp.uCOLCT ; nCount++)*/
+   } /* end of if(nRotatingTimes) */
+
+
+   /* Set new FNLOC, FFROT, ORLOC to  mapdata */
+   mbTemp.uFNLOC = nFNLOC;
+   mbTemp.uFFROT = nFFROT;
+   mbTemp.cORLOC = nORLOC;
+   memcpy(mbMapBody,&mbTemp,sizeof(MAP_BODY));
+
+         /******
+	   Added by stainles. 2000.03.23
+	   Return nRotatingTimes 
+	   for Checking about MapRotating Work  
+         ******/
+   return (nRotatingTimes);
+
+} /* end of function RotateMapBody*/
+
+
+
+
+
+
+
+ /*************************************************
+  * Insert into Log Table(RUNIDLOG_TIME) 
+  *************************************************/
+
+int InsertLog(stReqFile)
+	char *stReqFile;
+{
+	char stLog_Time[15];
+	char stBuff[512];
+/* modified by msyun 98/11/11
+	char  stRunId[15]; */
+EXEC SQL BEGIN DECLARE SECTION;
+	VARCHAR stRunId[15];
+EXEC SQL END DECLARE SECTION;
+/* end of modification */
+	char stPartId[30];
+	char stWafer_Count[3];
+	int  nWafer_Count;
+        int  nInkless_Flag;  /* Add 98/12/02 */
+	int  nSelect_Count;
+	char *stTok;
+	FILE *fpREQ;
+	
+    /* Set local Data Base descriptions and connect*/
+    username.len = sprintf((LPCTSTR)username.arr,"inkless");
+    passwd.len = sprintf((LPCTSTR)passwd.arr,"inkless");
+    EXEC SQL CONNECT :username IDENTIFIED BY :passwd ;
+    if(sqlca.sqlcode != 0) {
+#ifdef _DEBUG_LOG
+       printf("DATA BASE CONNECTION ERROR [%d]\n",sqlca.sqlcode);
+#endif
+       return(sqlca.sqlcode);
+    }
+#ifdef _DEBUG_LOG
+    printf("DATA BASE  CONNECTION COMPLETED!\n");
+#endif
+
+   if( (fpREQ=fopen(stReqFile, "r")) == NULL ) {
+                usleep(100000);
+                if( (fpREQ=fopen(stReqFile, "r")) == NULL ) {
+                        printf("Can't open : %s \n", stReqFile);
+			/** return -1;  Modified by stainles 2000.07.11 **/
+			return (Cvt_FileOpenErr);  /** *.REF file Open  Error **/
+                }
+   }  /* end of if ((fpREQ=fopen .....*/
+#ifdef _DEBUG_LOG
+    printf("[%s] file open success!\n", stReqFile);
+#endif
+
+        /* moidified by stainles 98/12/02 */
+   nInkless_Flag = 0;
+   fseek (fpREQ, 0L, SEEK_SET);
+
+   while(!feof(fpREQ)) {
+        memset(stBuff, '\0', sizeof(stBuff));
+        fgets(stBuff, sizeof(stBuff), fpREQ);
+   	if ( feof(fpREQ) ) break;
+        stTok = strtok(stBuff, DELIMITER);
+
+        if ( !memcmp(stTok, "LOTID", 5) ) {   /* this line : LOTID=ZTF446 */
+                stTok = strtok(NULL, DELIMITER);
+                memset(stRunId.arr, '\0', 15);
+                stRunId.len = sprintf((LPCTSTR)stRunId.arr,"%s", stTok);
+        }
+
+        if ( !memcmp(stTok, "PARTID", 6) ) {   /* this line : PARTID=KN72A2F */
+                stTok = strtok(NULL, DELIMITER);
+                memset(stPartId, '\0', 32);
+                memcpy(stPartId, stTok, strlen(stTok));
+        }
+
+        if ( !memcmp(stTok, "INKLESS", 7) ) {   /* this line : INKLESS=ON (or OFF) */
+                stTok = strtok(NULL, DELIMITER);
+                if ( !memcmp(stTok, "ON", 2) )  nInkless_Flag = 1;     /* if INKLESS=ON  */
+        }
+
+        if ( !memcmp(stTok, "WAFERTOTAL", 10) ) {   /* this line : WAFERTOTAL=24 */
+                stTok = strtok(NULL, DELIMITER);
+                memset(stWafer_Count, '\0', 3);
+                memcpy(stWafer_Count, stTok, strlen(stTok));
+                nWafer_Count = atoi(stWafer_Count);
+        }
+
+			/*****
+ 			 *  if  stTok = CHIPTOTAL=4503   or 		        *
+    			 *      stTok = COMPONENTS=(ZTI471.01,ZTI471.02 ..) or  *
+      			 *      stTok = GOODDIES=(212, 225, ....)   or          *
+		  	 *      stTok = ETC.... then   continue		        *
+	 					                          *******/
+   } /* end of while(!feof(fpREQ)...  */
+   fclose(fpREQ);
+                    /* end of modification  98/12/02/ .... stainles  */
+
+
+   memset(stLog_Time, '\0', 15); 
+   EXEC SQL SELECT TO_CHAR(SYSDATE, 'yyyymmddhh24miss') NOW
+	       INTO :stLog_Time
+	     FROM DUAL;
+   stLog_Time[14] = '\0';
+#ifdef _DEBUG_LOG
+    /* modified by msyun 98/11/11
+    printf("RunId : [%s]\n", stRunId); */
+    printf("RunId : [%s]\n", stRunId.arr);
+    /* end of modification */
+    printf("PartId : [%s]\n", stPartId);
+    printf("Wafer_Count : [%d]\n", nWafer_Count);
+    printf("nInkless_Flag : [%d]\n", nInkless_Flag);
+    printf("Current Time : [%s]\n", stLog_Time);
+#endif
+
+
+/*
+    EXEC SQL SELECT COUNT(*) into :nSelect_Count FROM RUNIDLOG_TIME
+             WHERE RUN_ID = :stRunId;
+    if(sqlca.sqlcode != 0)
+          printf("RUNIDLOG_TIME: LOG DATA INSERT Error [%d]\n", sqlca.sqlcode);
+#ifdef _DEBUG_LOG
+    printf("nSelect_Count : [%d]\n", nSelect_Count);
+#endif
+
+    if (nSelect_Count > 0) {
+        EXEC SQL UPDATE RUNIDLOG_TIME
+             SET TIME_STAMP = :stLog_Time, PART_ID = :stPartId, WAFER_COUNT = :nWafer_Count ,UPDATED = 1, INKLESS_FLAG = :nInkless_Flag
+             WHERE RUN_ID = :stRunId;
+    } else {
+        EXEC SQL INSERT INTO RUNIDLOG_TIME (RUN_ID, TIME_STAMP, PART_ID, WAFER_COUNT,UPDATED, INKLESS_FLAG, REMAIN_WF_CNT)
+                  VALUES ( :stRunId, :stLog_Time, :stPartId, :nWafer_Count, 1, :nInkless_Flag, 0);
+           }
+
+    if(sqlca.sqlcode != 0) {
+          printf("RUNIDLOG_TIME TABLE: LOG DATA INSERT Error [%d]\n", sqlca.sqlcode);
+	  return(sqlca.sqlcode);
+    }
+ */
+    EXEC SQL COMMIT;
+    EXEC SQL COMMIT WORK RELEASE;
+    return(EXE_OK);
+}
+
+int nInsertHalfInfo(char *cszWaferId, char *cszRunId,int nFirstCnt, int nSecondCnt, int nTotalCnt, char *cszPartId )
+{   
+
+   	 EXEC SQL BEGIN DECLARE SECTION;
+        
+        	VARCHAR ora_WaferId[20];
+        	VARCHAR ora_RunId[10];
+        	int     ora_nFirstCnt;
+        	int     ora_nSecondCnt;
+        	int     ora_nTotal;
+        	VARCHAR ora_PartId[33]; /* 2007.05.28 */
+
+    	EXEC SQL END DECLARE SECTION;
+
+	int nCnt ;
+
+    	username.len = sprintf((LPCTSTR)username.arr,"inkless");
+    	passwd.len = sprintf((LPCTSTR)passwd.arr,"inkless");
+    	EXEC SQL CONNECT :username IDENTIFIED BY :passwd ;
+    
+    	if(sqlca.sqlcode != 0) 
+    	{
+        	#ifdef _DEBUG_LOG
+            	printf("DATA BASE CONNECTION ERROR [%d]\n",sqlca.sqlcode);
+        	#endif
+        	return(sqlca.sqlcode);
+    	}
+
+	memset((char*)ora_RunId.arr, 0x00, sizeof(ora_RunId));
+    	memset((char*)ora_WaferId.arr, 0x00, sizeof(ora_WaferId));
+    	memset((char*)ora_PartId.arr, 0x00, sizeof(ora_PartId));    /* 2007.05.28 */
+
+	ora_RunId.len = sprintf((char *)ora_RunId.arr, cszRunId);
+    	ora_WaferId.len = sprintf((char *)ora_WaferId.arr, cszWaferId);
+    	ora_nFirstCnt = nFirstCnt;
+    	ora_nSecondCnt = nSecondCnt;
+    	ora_nTotal  = nTotalCnt;
+    	ora_PartId.len = sprintf((char *)ora_PartId.arr, cszPartId);  /* 2007.05.28 */
+
+/*
+	 EXEC SQL SELECT COUNT(*) CNT  INTO  :nCnt FROM HALF_MAP_INFO WHERE WAFER_ID = :ora_WaferId;
+
+    	printf("RUNID : %s , WAFERID :%s\n",(char*)ora_RunId.arr, (char*)ora_WaferId.arr);
+
+	if (nCnt == 0)  
+    	{
+        	printf("INSERT RUNID:%s, WAFERID:%s, 512CNT:%d, 256CNT:%d, TOTAL:%d, \n",(char*)ora_RunId.arr, (char*)ora_WaferId.arr, ora_nFirstCnt, ora_nSecondCnt, ora_nTotal);
+        	EXEC SQL INSERT INTO HALF_MAP_INFO(RUN_ID, WAFER_ID, BIN_1_CNT, BIN_2_CNT, TOTAL_CNT, PART_ID) VALUES(:ora_RunId, :ora_WaferId, :ora_nFirstCnt, :ora_nSecondCnt, :ora_nTotal, :ora_PartId);
+
+    	}
+    	else 
+	{
+        	printf("UPDATE RUNID:%s, WAFERID:%s, 512CNT:%d, 256CNT:%d, TOTAL:%d, \n",(char*)ora_RunId.arr, (char*)ora_WaferId.arr, ora_nFirstCnt, ora_nSecondCnt, ora_nTotal);
+        	EXEC SQL UPDATE HALF_MAP_INFO SET RUN_ID = :ora_RunId, BIN_1_CNT = :ora_nFirstCnt, BIN_2_CNT = :ora_nSecondCnt, TOTAL_CNT = :ora_nTotal, TIME_STAMP = SYSDATE, PART_ID = :ora_PartId 
+                 WHERE WAFER_ID = :ora_WaferId;
+    	}
+	
+	if(sqlca.sqlcode != 0) 
+   	{     
+        	#ifdef _DEBUG_LOG
+            	printf("DATA BASE ERROR HALF_MAP_INFO [%d]\n",sqlca.sqlcode);
+        	#endif
+        	return(sqlca.sqlcode);
+    	}
+*/
+    	EXEC SQL COMMIT WORK RELEASE;
+    	return(EXE_OK);
+}	
+	

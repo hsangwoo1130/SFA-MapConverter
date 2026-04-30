@@ -1,0 +1,134 @@
+#!/bin/sh -x
+PATH=$PATH:/usr/sbin; export PATH
+#locdir=/OYMD/DATA08/inkless/data/map_file_error/
+locdir=/data/file01/map_file_error/
+exit_status=0   # no error condition exit code
+lflag=""        # Don't user log by default
+tdirection=put # Retrieve file by default
+export tdirection
+tmode=ascii	# use ascii representation type by default
+export tmode
+#LogFile=$HOME/.transfer_log # log file  path
+LogFile=$HOME/LOG/transfer_RPY.log # log file  path
+export LogFile
+usage_exit() {
+cat << EOF >&2
+Usage : `basename $0` [-p] [-b] [-l] [-r rem-dir] -h host file...
+      -p	put inseted of take the file
+      -b   	Use binary instead of ASCII mode
+      -l 	Store messages from ftp in log file
+      -r rem-dir  Specify remote directory instead of default()
+      -h host 	remote host name
+      file 	File(s) to be transferred
+EOF
+exit_status=1; exit
+}
+# set trap to restore .netrc file :
+trap '[ -f $HOME/.netrc% ] &&
+	mv $HOME/.netrc% $HOME/.netrc; exit $exit_status' 0 1 2 3 15
+
+# process comand - line options;
+
+if [ "$OPTIND" = 1 ]; then # can use getopts
+	while getopts bh:lpr: options;do
+		case "$options" in
+			b) tmode=binary;;
+			h) host=$OPTARG;;
+			l) lflag=yes;;
+			p) tdirection=mput;;
+			r) remdir=$OPTARG;;
+			\?) usage_exit;;
+		esac
+	 done
+	shift `expr $OPTIND - 1`     #shift options of the way
+else
+	while [ $# -gt 0 ]; do
+		case $1 in
+			-b) tmode=binary; shift ;;
+			-h) if [ ! "$2" ]; then
+			     echo "-h option requires an argument" >&2
+			     usage_exit
+			    else
+			     host=$2;shift ; shift
+			    fi ;;
+### Blocked by msyuun 99/1/21			-l) lflag=yes; shift ;;
+		        -p) tdirection=mput;shift;;
+			-r) if [ ! "$2" ]; then
+                             echo "-r option requires an argument" >&2
+                             usage_exit
+                            else
+                             remdir=$2;shift;shift
+                            fi;;
+			--) shift; break ;; #end of option list
+			-*) echo "Unrecognized option \"$1\"" >&2
+			     usage_exit ;;
+			*) break ;;  #saw first non-option argument
+		esac
+	done
+fi
+
+# Check for non-option (file) arguments(s):
+
+case $# in
+	0) echo "Must specify at least one file arguments" >&2
+	  usage_exit ;;
+esac
+
+#Check for remote system name , remote directory
+
+if [ ! "$host" ]; then
+	echo "You must specify a remote host machine." >&2
+	usage_exit
+elif [ ! "$remdir" ]; then   # if no remote direcotry, then
+#	remdir="."	     # use current directory
+	remdir="/MAP/inkless/_ONYANG"	     # use current directory
+fi
+
+########## Echo a packet to see if remote host is reachable:
+#if /etc/ping $host 64 5 >/dev/null 2>&1; then
+if /etc/ping $host 64 1 >/dev/null 2>&1; then
+:  # No problem
+else 
+echo "$host either down or doesn't exist." >&2;
+exit_status=2; exit
+fi
+
+#check .netrc file:
+if [ -f $HOME/.netrc ]; then
+	hostinfo=`grep $host ${HOME}/.netrc`
+	if [ ! "$hostinfo" ]; then 
+	echo "NO $host entry found in $HOME/.netrc ,exiting ..." >&2
+	exit_status=4; exit
+	fi
+	mv $HOME/.netrc $HOME/.netrc% # save origianal file
+	# Create new .netrc that's only accessible by owner:
+	touch $HOME/.netrc
+	chmod go-rw $HOME/.netrc
+else
+	echo "$HOME/.netrc not found. exiting ..." >&2;
+	exit_status=3; exit
+fi
+
+# Put the set-up information into .netrc:
+echo "LOG FILE NAME" $LogFile
+echo "MODE" $tmode
+
+cat << EOF >> $HOME/.netrc
+$hostinfo
+macdef init
+cd $remdir
+lcd $locdir
+$tmode
+prompt off
+$tdirection $*
+quit
+
+EOF
+
+#LOG transaction in file or on standard output:
+if [ "$lflag" ]; then
+	date >> $LogFile        # note date/time
+	ftp $host >> $LogFile  # log ftp message
+else
+	ftp $host
+fi

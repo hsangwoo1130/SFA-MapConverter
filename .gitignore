@@ -1,0 +1,29 @@
+# Compiled binaries
+*.o
+*.a
+*.exe
+*.ex_
+*.out
+a.out
+
+# Visual Studio
+.vs/
+Debug/
+Release/
+*.ncb
+*.suo
+*.user
+*.v12.suo
+UpgradeLog.htm
+
+# Logs & temp
+sqlnet.log
+trace.log
+*.log
+
+# Archives
+*.zip
+*.tar
+
+# Oracle Pro*C generated
+*.lis

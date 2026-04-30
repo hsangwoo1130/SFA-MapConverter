@@ -1,0 +1,6 @@
+#cc Map_data_task.c RegistProcess.c -D_DEBUG_MODE -o Map_data_task.exe
+#echo "***Compile Complete : DEBUG_MODE*** "
+cc Map_data_task.c RegistProcess.c -w -o Map_data_task.exe
+echo "*** Compile Complete  : NORMAL_MODE*** "
+echo
+echo "===== Delete Object file (Map_data_task.o) ====== "

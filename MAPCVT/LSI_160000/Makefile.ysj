@@ -1,0 +1,40 @@
+all:: MKSrv
+
+include $(ORACLE_HOME)/precomp/lib/env_precomp.mk
+
+LDSTRING=
+PRODUCT_LIBHOME=
+USERID=inkless/inkless
+PROCPLSFLAGS= sqlcheck=full userid=$(USERID) dbms=v6_char
+PROCPPFLAGS= code=cpp include=/usr/include include=/usr/include/cxx
+INCLUDE=$(I_SYM). $(PRECOMPPUBLIC)
+
+CXX=cc
+OBJ=Mapcvt_Insert.o RegistProcessCvt.o InsertDB.o
+#MBTLIB=/users/mksrv/source/lib/MBTLib.a
+EXE=Mapcvt_Insert.exe
+
+.SUFFIXES:.o .c .pc
+
+MKSrv : $(OBJ) 
+	$(PROC) $(PROCPPFLAGS) iname=InsertDB.pc
+	$(CXX) -o $(EXE) $(OBJ) -L$(LIBHOME) $(PROLDLIBS)
+	@rm -f *.o
+	@strip $(EXE)
+	@mv $(EXE) /users/mksrv/bin
+	@/users/mksrv/bin/MKSrv
+
+sqlTest: sqltest.o
+	$(CXX) -o sqltest sqltest.o -L$(LIBHOME) $(PROLDLIBS)
+
+sock: sock.o
+	$(CXX) -o sock sock.o $(MBTLIB) -L$(LIBHOME) $(PROLDLIBS)
+
+clean:
+	@rm -f *.o *.LOG *.Log *.log
+
+.pc.c:
+	$(PROC) $(PROCPPFLAGS) iname=InsertDB.pc
+
+.c.o:
+	$(CXX) -c $(INCLUDE) $*.c
